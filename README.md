@@ -60,6 +60,21 @@ See [docs/ADB_EDITION.md](docs/ADB_EDITION.md) for usage.
 - Rebooting ends the root session.
 - Other firmware versions require separate validation.
 
+## Zygisk Implementation - Experimental
+
+Zygisk via NeoZygisk under late-load root: experimental, high success rate.
+
+Ten verified full successes in a row (injection + hooks live in spawned apps — zygisk-core32 logcat evidence).
+Failures narrowed to sepolicy application.
+
+~~All subsequent attempts (~8) fail inside the injector at the ptrace attach (failed to trace zygote in the injector log) despite controlling for: fresh boot, single monitor, verified arming, detached stdio, applied sepolicy, zygote generation.~~
+
+On failure the monitor safety-kills the zygote up to ~4 times, then parks; the framework recovers to plain root within ~2 minutes.
+No power cycle required in any observed failure since the stdio/pkill fixes.
+GHOSTLOCK_ZYGISK=1 costs one chain run + ~90s; worst case is a working root without Zygisk.
+
+See [docs/ADB_EDITION.md](docs/ADB_EDITION.md) for usage.
+
 ## Credits
 
 This port builds on work from

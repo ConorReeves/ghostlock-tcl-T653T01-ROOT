@@ -37,6 +37,14 @@ export GHOSTLOCK_SAFE_MODE=1
 ./run-tcl-c855-v643-adb.sh
 ```
 
+To run with experimental (high success) Zygisk loading:
+
+```sh
+export ADB_TARGET=192.0.2.10:5555
+export GHOSTLOCK_ZYGISK=1
+./run-tcl-c855-v643-adb.sh
+```
+
 Replace the documentation address above with the TV address. ADB uses the
 host's already configured, owner-authorized identity. No address or ADB
 private key is bundled in the release.

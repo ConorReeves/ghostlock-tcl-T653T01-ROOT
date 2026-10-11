@@ -24,6 +24,13 @@ EXPECTED_MODULE=b6aeb907bd468852a11d7a90d121df87e1716f3b9549c69ee0190607e0d5f50c
 EXPECTED_POLICY=1930f6750090c816a3ea8cc32f752e2eec9b9e6d10d2851fe001fd690b069819
 EXPECTED_POLICY_SIZE=1030054
 
+# Zygisk activation requires safe mode during the chain (a live NeoZygisk
+# at late-load crashes the TV; the post-chain Zygisk block re-enables and
+# injects it properly). Force it if GHOSTLOCK_ZYGISK=1.
+if [ "${GHOSTLOCK_ZYGISK:-0}" = "1" ]; then
+  GHOSTLOCK_SAFE_MODE=1
+fi
+
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 LOG_DIR=${GHOSTLOCK_LOG_DIR:-$PWD/ghostlock-tcl-c855-$STAMP}
 mkdir -p "$LOG_DIR"
@@ -127,9 +134,10 @@ REMOTE_MODULE=$REMOTE/resukisu-tcl-v643.ko
 STATUS=/data/local/tmp/.tcl_resukisu_handoff_$boot_id.status
 
 # --- safe mode activation ---------------------------------------------
-# GHOSTLOCK_SAFE_MODE=0 (default): the handoff disables every module under
-# /data/adb/modules before the ksud late-load. Set to 1 while any crasher
-# module (like NeoZygisk) is enabled.
+# GHOSTLOCK_SAFE_MODE=0 (default): modules load normally with the root
+# chain. Set to 1 to disable ALL modules under /data/adb/modules before
+# the ksud late-load (recovery mode for crasher modules like NeoZygisk's
+# live-zygote injection, or boot-time-activation modules).
 GHOSTLOCK_SAFE_MODE=${GHOSTLOCK_SAFE_MODE:-0}
 if [ "$GHOSTLOCK_SAFE_MODE" = "1" ]; then
   "$ADB" -s "$ADB_TARGET" shell "touch $REMOTE/.safe_mode"
@@ -234,6 +242,53 @@ for marker in state=READY module=kernelsu mode=volatile late_load=ok \
   POLICYCAPS=11100100 SELINUX=Enforcing AVB=green/locked ADB_POST=ok; do
   printf '%s\n' "$validation" | grep -Fq "$marker"
 done
+
+# --- Zygisk activation (GHOSTLOCK_ZYGISK=1) -----------------------------
+# Runs AFTER a successful chain. Applies NeoZygisk's sepolicy rules,
+# re-enables the module, starts its monitor, and kill -9's the zygote
+# (NOT ctl.restart — the ptrace monitor keys on zygote death events;
+# ctl.restart crashes it. Verified working 2026-10-11.)
+GHOSTLOCK_ZYGISK=${GHOSTLOCK_ZYGISK:-0}
+if [ "$GHOSTLOCK_ZYGISK" = "1" ]; then
+  MODDIR=/data/adb/modules/zygisksu
+  STAGE=/data/adb/neozygisk
+
+  echo "[*] zygisk: applying sepolicy rules"
+  "$ADB" -s "$ADB_TARGET" shell "su -c 'cd $MODDIR && $REMOTE_KSUD sepolicy apply sepolicy.rule 2>&1'"
+
+  echo "[*] zygisk: clearing any stale monitor processes"
+  "$ADB" -s "$ADB_TARGET" shell "su -c 'pkill -x zygisk-ptrace32; pkill -x zygiskd32; pkill -x zygisk-ptrace; pkill -x zygiskd; sleep 1; true'"
+
+  echo "[*] zygisk: enabling module + starting monitor"
+  "$ADB" -s "$ADB_TARGET" shell "su -c 'rm -f $MODDIR/disable; nohup sh $MODDIR/post-fs-data.sh > /data/local/tmp/zygisk-init.log 2>&1 &'"
+
+  echo "[*] zygisk: waiting for monitor to arm (tracing state)"
+  for i in $(seq 1 20); do
+    M=$("$ADB" -s "$ADB_TARGET" shell "su -c 'cat $STAGE/module.prop 2>/dev/null'" 2>/dev/null | grep -c "monitor.*tracing" || true)
+    [ "$M" -ge 1 ] && break
+    sleep 1
+  done
+  sleep 2   # small settle margin even after state shows tracing
+
+  echo "[*] zygisk: killing zygote (monitor injects the respawn)"
+  "$ADB" -s "$ADB_TARGET" shell "su -c 'kill -9 \$(pidof zygote)'"
+
+  echo "[*] zygisk: waiting for injection + framework recovery (up to 180s)"
+  ST=0
+  for i in $(seq 1 90); do
+    timeout 3 "$ADB" connect "$ADB_TARGET" >/dev/null 2>&1 || true
+    ST=$(timeout 10 "$ADB" -s "$ADB_TARGET" shell "su -c 'cat $STAGE/module.prop 2>/dev/null'" 2>/dev/null | grep -a zygote32 | grep -av "not injected" | grep -ac injected) || ST=0
+    BA=$(timeout 10 "$ADB" -s "$ADB_TARGET" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r') || BA=""
+    if [ "$ST" -ge 1 ] && [ "$BA" = "stopped" ]; then
+      echo "[+] zygisk: INJECTED and framework recovered"
+      break
+    fi
+    sleep 2
+  done
+  if [ "${ST:-0}" -lt 1 ]; then
+    echo "[-] zygisk: injection not confirmed — check $STAGE/module.prop on device"
+  fi
+fi
 
 sha256sum "$LOG_DIR"/*.log "$LOG_DIR"/*.txt > "$LOG_DIR/SHA256SUMS"
 printf '%s\n' \
