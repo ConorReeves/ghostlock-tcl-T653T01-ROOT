@@ -29,6 +29,14 @@ export ADB_TARGET=192.0.2.10:5555
 ./run-tcl-c855-v643-adb.sh
 ```
 
+If needed, to run safe-mode (all user-installed modules unloaded on successful run):
+
+```sh
+export ADB_TARGET=192.0.2.10:5555
+export GHOSTLOCK_SAFE_MODE=1
+./run-tcl-c855-v643-adb.sh
+```
+
 Replace the documentation address above with the TV address. ADB uses the
 host's already configured, owner-authorized identity. No address or ADB
 private key is bundled in the release.

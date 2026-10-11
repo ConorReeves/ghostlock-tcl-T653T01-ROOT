@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -338,6 +339,30 @@ static int run_bounded(const char *path, char *const argv[], int timeout_ms) {
   return wait_bounded(child, timeout_ms);
 }
 
+/* Safe mode introduced */
+static void safe_mode_disable_all_modules(void) {
+  DIR *d = opendir("/data/adb/modules");
+  if (d) {
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+      if (de->d_name[0] == '.') continue;
+      char p[512];
+      snprintf(p, sizeof(p), "/data/adb/modules/%s/disable", de->d_name);
+      int fd = open(p, O_CREAT | O_WRONLY, 0644);
+      if (fd >= 0) close(fd);
+    }
+    closedir(d);
+  }
+}
+
+/* Safe mode is selected by a marker file in the runtime lab directory,
+ * created by the launcher (ADB run script or the APK) before the chain
+ * starts. Present = disable all modules before the ksud late-load. */
+static int safe_mode_active(void) {
+  return access("/data/local/tmp/tcl-v643-resukisu-lab/.safe_mode",
+                F_OK) == 0;
+}
+
 /* The custom TCL ksud command loads the exact module and then enters
  * late-load without a second exec.  Loading the module re-enables SELinux;
  * therefore killing this child at the first /proc/modules witness would
@@ -345,6 +370,10 @@ static int run_bounded(const char *path, char *const argv[], int timeout_ms) {
 static int run_until_module_loaded(const char *path, char *const argv[],
                                    const char *status_path, int timeout_ms,
                                    enum kernel_witness *final_witness) {
+  if (safe_mode_active()) {
+    fprintf(stderr, "[*] safe mode: disabling all modules before late-load\n");
+    safe_mode_disable_all_modules();
+  }
   pid_t child = fork();
   if (child < 0) return 126;
   if (child == 0) {

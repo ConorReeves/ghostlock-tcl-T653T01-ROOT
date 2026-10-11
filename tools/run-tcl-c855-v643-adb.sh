@@ -17,7 +17,7 @@ MANAGER_PACKAGE=com.philiphall6.resukisu.tcl
 
 EXPECTED_GHOST=6529ef8f76bd6dda073850f5fe227b808bd05e1a1a90e13cff24d06bb1d91b91
 EXPECTED_HELPER=4ca5692192b0a7598243f5070adf1e676ccd943aad4a292579ea69d38bbf1019
-EXPECTED_HANDOFF=e519266c0a9774b63e48c8df7c813284073c320314121952bae18ecbfd5fd299
+EXPECTED_HANDOFF=6c982f06e988c5f1ac4808524ac230b87f5aa9a375fba9c8f7ccc09aa56ba61b
 EXPECTED_PREFLIGHT=8ce8a4dc9dec167ce5e04858e3cd83c1a7a0ec35573d55010aae88234d43a7c0
 EXPECTED_KSUD=528c80259613a1e27a90d8f202fda33ecceba9c1fd42e1d807fdbbc859af5e68
 EXPECTED_MODULE=b6aeb907bd468852a11d7a90d121df87e1716f3b9549c69ee0190607e0d5f50c
@@ -125,6 +125,19 @@ REMOTE_PREFLIGHT=$REMOTE/tcl-resukisu-preflight
 REMOTE_KSUD=$REMOTE/resukisu-ksud-armv7
 REMOTE_MODULE=$REMOTE/resukisu-tcl-v643.ko
 STATUS=/data/local/tmp/.tcl_resukisu_handoff_$boot_id.status
+
+# --- safe mode activation ---------------------------------------------
+# GHOSTLOCK_SAFE_MODE=0 (default): the handoff disables every module under
+# /data/adb/modules before the ksud late-load. Set to 1 while any crasher
+# module (like NeoZygisk) is enabled.
+GHOSTLOCK_SAFE_MODE=${GHOSTLOCK_SAFE_MODE:-0}
+if [ "$GHOSTLOCK_SAFE_MODE" = "1" ]; then
+  "$ADB" -s "$ADB_TARGET" shell "touch $REMOTE/.safe_mode"
+  echo "[*] safe mode: ACTIVE (all modules disabled before late-load)"
+else
+  "$ADB" -s "$ADB_TARGET" shell "rm -f $REMOTE/.safe_mode"
+  echo "[*] safe mode: off"
+fi
 
 "$ADB" -s "$ADB_TARGET" shell "mkdir -p '$REMOTE' && chmod 700 '$REMOTE'"
 "$ADB" -s "$ADB_TARGET" push "$GHOST" "$REMOTE_GHOST"
